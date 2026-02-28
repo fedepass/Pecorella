@@ -272,10 +272,10 @@ class Game {
 
     for (const obs of this.obstacles.obstacles) {
       if (obs.cleared) continue;
-      const ox = obs.x + obs.def.hbx;
-      const oy = obs.y + obs.def.hby;
-      const ow = obs.def.hbw;
-      const oh = obs.def.hbh;
+      const ox = obs.x + obs.shbx;
+      const oy = obs.y + obs.shby;
+      const ow = obs.shbw;
+      const oh = obs.shbh;
 
       if (sx < ox + ow && sx + sw > ox && sy < oy + oh && sy + sh > oy) {
         return true;
@@ -355,7 +355,7 @@ class Game {
     );
     for (const obs of this.obstacles.obstacles) {
       ctx.strokeStyle = 'rgba(0,200,255,0.7)';
-      ctx.strokeRect(obs.x + obs.def.hbx, obs.y + obs.def.hby, obs.def.hbw, obs.def.hbh);
+      ctx.strokeRect(obs.x + obs.shbx, obs.y + obs.shby, obs.shbw, obs.shbh);
     }
   }
 }

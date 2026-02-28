@@ -63,6 +63,22 @@ const C = {
     { time: 40,  tier: 'ALL' }
   ],
 
+  // Scala ostacoli in base al tempo (altezza e larghezza proporzionali)
+  OBSTACLE_SCALE: [
+    { time: 0,  min: 0.7,  max: 1.0  },
+    { time: 15, min: 0.85, max: 1.25 },
+    { time: 35, min: 1.0,  max: 1.5  },
+    { time: 55, min: 1.15, max: 1.7  },
+  ],
+
+  // Distanza di spawn decrescente col tempo
+  OBSTACLE_SPAWN: [
+    { time: 0,  min: 500, max: 900 },
+    { time: 20, min: 420, max: 750 },
+    { time: 40, min: 340, max: 600 },
+    { time: 60, min: 270, max: 500 },
+  ],
+
   // --- PUNTEGGIO ---
   SCORE_PER_FRAME:         1,
   SCORE_PERFECT_JUMP:      5,

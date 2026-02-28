@@ -1,10 +1,18 @@
 // public/js/Obstacle.js
 class Obstacle {
-  constructor(type, x, y, def) {
+  constructor(type, x, y, def, scale = 1) {
     this.type = type;
     this.x = x;
     this.y = y;
     this.def = def;
+    this.scale = scale;
+    // Dimensioni scalate usate per collisioni e posizionamento
+    this.sw   = def.w   * scale;
+    this.sh   = def.h   * scale;
+    this.shbx = def.hbx * scale;
+    this.shby = def.hby * scale;
+    this.shbw = def.hbw * scale;
+    this.shbh = def.hbh * scale;
     this.animTimer = 0;
     this.cleared = false;
   }
@@ -15,12 +23,13 @@ class Obstacle {
   }
 
   isOffScreen() {
-    return this.x + this.def.w < -20;
+    return this.x + this.sw < -20;
   }
 
   draw(ctx) {
     ctx.save();
     ctx.translate(this.x, this.y);
+    ctx.scale(this.scale, this.scale);
     switch (this.type) {
       case 'HAY':      this._drawHay(ctx); break;
       case 'CAKE':     this._drawCake(ctx); break;
@@ -599,13 +608,30 @@ class ObstacleManager {
   reset(gameStartTime) {
     this.obstacles = [];
     this._distSinceLast = 0;
-    this._spawnDist = this._randomDist();
     this._gameStartTime = gameStartTime;
+    this._spawnDist = this._randomDist();
   }
 
   _randomDist() {
-    return C.OBSTACLE_SPAWN_DIST_MIN +
-      Math.random() * (C.OBSTACLE_SPAWN_DIST_MAX - C.OBSTACLE_SPAWN_DIST_MIN);
+    if (!this._gameStartTime) {
+      const r = C.OBSTACLE_SPAWN[0];
+      return r.min + Math.random() * (r.max - r.min);
+    }
+    const elapsed = (Date.now() - this._gameStartTime) / 1000;
+    let range = C.OBSTACLE_SPAWN[0];
+    for (const s of C.OBSTACLE_SPAWN) {
+      if (elapsed >= s.time) range = s;
+    }
+    return range.min + Math.random() * (range.max - range.min);
+  }
+
+  _getScale() {
+    const elapsed = (Date.now() - this._gameStartTime) / 1000;
+    let range = C.OBSTACLE_SCALE[0];
+    for (const s of C.OBSTACLE_SCALE) {
+      if (elapsed >= s.time) range = s;
+    }
+    return range.min + Math.random() * (range.max - range.min);
   }
 
   _pickType() {
@@ -642,9 +668,10 @@ class ObstacleManager {
     if (this.obstacles.length >= C.OBSTACLE_POOL_SIZE) return;
     const type = this._pickType();
     const def = C.OBSTACLES[type];
+    const scale = this._getScale();
     const x = C.CANVAS_WIDTH + 50;
-    const y = C.GROUND_Y - def.h;
-    this.obstacles.push(new Obstacle(type, x, y, def));
+    const y = C.GROUND_Y - def.h * scale;
+    this.obstacles.push(new Obstacle(type, x, y, def, scale));
   }
 
   draw(ctx) {
@@ -657,7 +684,7 @@ class ObstacleManager {
   collectCleared() {
     const cleared = [];
     for (const obs of this.obstacles) {
-      if (!obs.cleared && obs.x + obs.def.w < C.SHEEP_X) {
+      if (!obs.cleared && obs.x + obs.sw < C.SHEEP_X) {
         obs.cleared = true;
         cleared.push(obs);
       }
