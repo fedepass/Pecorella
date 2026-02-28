@@ -142,12 +142,11 @@ const C = {
   SQUISH_FACTOR_MAX: 0.25,     // compressione verticale massima durante carica
 
   // --- OSTACOLI ---
-  OBSTACLE_SPAWN_DIST_MIN: 400,  // distanza minima tra ostacoli (px)
-  OBSTACLE_SPAWN_DIST_MAX: 800,  // distanza massima tra ostacoli (px)
-  OBSTACLE_POOL_SIZE:       10,  // numero massimo di ostacoli attivi
+  OBSTACLE_POOL_SIZE: 10,  // numero massimo di ostacoli attivi contemporaneamente
 
-  // --- OSTACOLI: definizione dimensioni (width, height, hitbox ridotta) ---
-  // hitbox è sempre più piccola dello sprite per generosità verso il giocatore
+  // --- OSTACOLI: dimensioni base (width, height, hitbox ridotta) ---
+  // La hitbox è intenzionalmente più piccola dello sprite (~20-25%)
+  // Le dimensioni effettive vengono moltiplicate per `scale` al momento dello spawn
   OBSTACLES: {
     HAY:      { w: 70,  h: 55,  hbx: 8,  hby: 6,  hbw: 54, hbh: 44 },
     CAKE:     { w: 75,  h: 95,  hbx: 8,  hby: 8,  hbw: 58, hbh: 78 },
@@ -161,19 +160,38 @@ const C = {
     CACTUS:   { w: 60,  h: 70,  hbx: 10, hby: 6,  hbw: 40, hbh: 58 }
   },
 
-  // Classificazione altezza per spawn progressivo
+  // Classificazione tipo per spawn progressivo basato su tier
   OBSTACLE_TIERS: {
     LOW:    ['HAY', 'BUCKET', 'CACTUS'],
     MEDIUM: ['CAKE', 'MUSHROOM', 'SHEEP2', 'CASTLE'],
     HIGH:   ['RAINBOW', 'BOOKS', 'RABBIT']
   },
 
-  // --- PROGRESSIONE DIFFICOLTÀ (soglie in secondi di gioco) ---
+  // --- PROGRESSIONE DIFFICOLTÀ: tipo ostacolo (soglie in secondi) ---
   DIFFICULTY: [
     { time: 0,   tier: 'LOW' },
     { time: 10,  tier: 'MEDIUM' },
     { time: 25,  tier: 'HIGH' },
     { time: 40,  tier: 'ALL' }   // tutti i tipi possono apparire
+  ],
+
+  // --- PROGRESSIONE DIFFICOLTÀ: scala ostacolo (altezza e larghezza) ---
+  // Ogni ostacolo viene disegnato con ctx.scale(scale, scale) e la sua
+  // hitbox viene calcolata come def.hbx * scale, ecc.
+  OBSTACLE_SCALE: [
+    { time: 0,  min: 0.7,  max: 1.0  },  // piccoli/normali all'inizio
+    { time: 15, min: 0.85, max: 1.25 },
+    { time: 35, min: 1.0,  max: 1.5  },
+    { time: 55, min: 1.15, max: 1.7  },  // molto grandi a regime
+  ],
+
+  // --- PROGRESSIONE DIFFICOLTÀ: distanza di spawn (px percorsi tra ostacoli) ---
+  // La distanza decresce col tempo per aumentare la frequenza degli ostacoli
+  OBSTACLE_SPAWN: [
+    { time: 0,  min: 500, max: 900 },
+    { time: 20, min: 420, max: 750 },
+    { time: 40, min: 340, max: 600 },
+    { time: 60, min: 270, max: 500 },
   ],
 
   // --- PUNTEGGIO ---
@@ -430,15 +448,19 @@ if (actualJumpHeight <= requiredJumpHeight + 30) {
 
 ```javascript
 // L'Obstacle Manager tiene traccia di quando spawnare il prossimo ostacolo
-// basandosi sulla distanza percorsa dall'ultimo ostacolo spawnato
+// basandosi sulla distanza percorsa dall'ultimo ostacolo spawnato.
+// La distanza di spawn e la scala diminuiscono/aumentano con il tempo (difficoltà crescente).
+
 spawnNext() {
-  const type = pickObstacleType(); // basato su DIFFICULTY[currentTier]
+  const type = pickObstacleType();   // basato su DIFFICULTY[currentTier]
+  const def  = C.OBSTACLES[type];
+  const scale = getScale();          // scala random in base al tempo trascorso
   const x = C.CANVAS_WIDTH + 50;
-  const def = C.OBSTACLES[type];
-  const y = C.GROUND_Y - def.h;
-  return new Obstacle(type, x, y, def);
+  const y = C.GROUND_Y - def.h * scale;  // posizionamento a terra corretto
+  return new Obstacle(type, x, y, def, scale);
 }
 
+// Sceglie il tipo di ostacolo in base al tier corrente
 pickObstacleType() {
   const elapsed = (Date.now() - gameStartTime) / 1000;
   let allowedTiers = [];
@@ -450,7 +472,29 @@ pickObstacleType() {
   const pool = allowedTiers.flatMap(t => C.OBSTACLE_TIERS[t]);
   return pool[Math.floor(Math.random() * pool.length)];
 }
+
+// Calcola la scala dell'ostacolo in base al tempo trascorso
+getScale() {
+  const elapsed = (Date.now() - gameStartTime) / 1000;
+  let range = C.OBSTACLE_SCALE[0];
+  for (const s of C.OBSTACLE_SCALE) {
+    if (elapsed >= s.time) range = s;
+  }
+  return range.min + Math.random() * (range.max - range.min);
+}
+
+// Calcola la distanza di spawn in base al tempo trascorso
+randomDist() {
+  const elapsed = (Date.now() - gameStartTime) / 1000;
+  let range = C.OBSTACLE_SPAWN[0];
+  for (const s of C.OBSTACLE_SPAWN) {
+    if (elapsed >= s.time) range = s;
+  }
+  return range.min + Math.random() * (range.max - range.min);
+}
 ```
+
+**Nota:** `reset(gameStartTime)` deve impostare `this._gameStartTime` **prima** di chiamare `randomDist()`, altrimenti la prima distanza di spawn viene calcolata con il tempo sbagliato.
 
 ### 6.2 Movimento Ostacoli
 
@@ -1188,10 +1232,11 @@ function checkCollision(sheep, obstacle) {
   const sw = C.SHEEP_HITBOX_W;
   const sh = C.SHEEP_HITBOX_H;
 
-  const ox = obstacle.x + obstacle.def.hbx;
-  const oy = obstacle.y + obstacle.def.hby;
-  const ow = obstacle.def.hbw;
-  const oh = obstacle.def.hbh;
+  // Hitbox scalata: pre-calcolata nel costruttore di Obstacle come def.hb* * scale
+  const ox = obstacle.x + obstacle.shbx;
+  const oy = obstacle.y + obstacle.shby;
+  const ow = obstacle.shbw;
+  const oh = obstacle.shbh;
 
   return sx < ox + ow &&
          sx + sw > ox &&
@@ -1202,9 +1247,15 @@ function checkCollision(sheep, obstacle) {
 
 **Tolleranza:** le hitbox sono intenzionalmente più piccole degli sprite del 20-25% per rendere il gioco "generoso" e non frustrante per una bambina.
 
+**Scala visiva vs. hitbox:** il disegno viene scalato tramite `ctx.scale(scale, scale)` nel metodo `draw()`. Le proprietà scalate `sw`, `sh`, `shbx`, `shby`, `shbw`, `shbh` sono calcolate una volta nel costruttore di `Obstacle` e riutilizzate per collision detection, off-screen check e obstacle-cleared check.
+
 ---
 
 ## 17. VELOCITÀ E PROGRESSIONE DIFFICOLTÀ
+
+La difficoltà cresce su tre assi indipendenti e simultanei:
+
+### 17.1 Velocità di gioco
 
 ```javascript
 // In Game.update(delta)
@@ -1215,7 +1266,6 @@ this.speed = Math.min(
 // frameCount si azzera ad ogni reset
 ```
 
-**Tabella progressione velocità:**
 | Tempo (sec) | Velocità approssimativa (px/frame) |
 |---|---|
 | 0 | 5 |
@@ -1224,6 +1274,37 @@ this.speed = Math.min(
 | 120 | 10.7 |
 | 180 | 13.5 |
 | ~235 | 14 (max) |
+
+### 17.2 Tipo di ostacolo (tier)
+
+| Tempo (sec) | Tier attivi |
+|---|---|
+| 0 – 10 | LOW (Fieno, Secchio, Cactus) |
+| 10 – 25 | MEDIUM (Torta, Fungo, Pecora2, Castello) |
+| 25 – 40 | HIGH (Arcobaleno, Libri, Coniglio) |
+| 40+ | ALL (tutti i tipi) |
+
+### 17.3 Scala ostacolo (altezza e larghezza)
+
+Ogni ostacolo riceve una scala casuale nell'intervallo corrente. La scala si applica sia al disegno (`ctx.scale`) che alle hitbox (valori pre-moltiplicati nel costruttore).
+
+| Tempo (sec) | Scala min | Scala max |
+|---|---|---|
+| 0 – 15 | 0.7× | 1.0× |
+| 15 – 35 | 0.85× | 1.25× |
+| 35 – 55 | 1.0× | 1.5× |
+| 55+ | 1.15× | 1.7× |
+
+### 17.4 Frequenza di spawn (distanza tra ostacoli)
+
+La distanza percorsa tra uno spawn e il successivo diminuisce nel tempo.
+
+| Tempo (sec) | Distanza min (px) | Distanza max (px) |
+|---|---|---|
+| 0 – 20 | 500 | 900 |
+| 20 – 40 | 420 | 750 |
+| 40 – 60 | 340 | 600 |
+| 60+ | 270 | 500 |
 
 ---
 
